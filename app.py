@@ -1,73 +1,28 @@
 import streamlit as st
 import yfinance as yf
-import requests
 import pandas as pd
 import plotly.graph_objects as go
-import os
+import numpy as np
 
 # ----------------------------
 # CONFIG
 # ----------------------------
-st.set_page_config(page_title="AI Stock Analyzer", layout="wide")
-st.title("📊 AI Stock Analyzer")
+st.set_page_config(page_title="AI Stock Leaderboard", layout="wide")
+st.title("🏆 AI Stock Leaderboard (Yahoo Finance)")
 
 # ----------------------------
-# SAFE API KEY HANDLING (FIXED)
+# STOCK UNIVERSE (you can edit this list)
 # ----------------------------
-
-API_KEY = None
-
-# 1. Try Streamlit secrets (safe access)
-try:
-    API_KEY = st.secrets.get("FMP_API_KEY", None)
-except Exception:
-    API_KEY = None
-
-# 2. Try environment variable
-if not API_KEY:
-    API_KEY = os.getenv("FMP_API_KEY")
-
-# 3. LAST RESORT: user input in sidebar (FIX THAT BREAKS EVERYTHING)
-if not API_KEY:
-    API_KEY = st.sidebar.text_input(
-        "Enter FMP API Key",
-        type="password",
-        help="Get your key from financialmodelingprep.com"
-    )
+STOCK_LIST = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
+    "META", "TSLA", "NFLX", "AMD", "INTC",
+    "JPM", "V", "MA", "DIS", "KO"
+]
 
 # ----------------------------
-# FMP DATA FUNCTION (SAFE)
+# DATA FETCH
 # ----------------------------
-def get_fmp_data(ticker):
-    if not API_KEY:
-        return None
-
-    url = f"https://financialmodelingprep.com/api/v3/key-metrics/{ticker}?apikey={API_KEY}"
-
-    try:
-        r = requests.get(url, timeout=10)
-        data_json = r.json()
-
-        # API sometimes returns dict instead of list on error
-        if not isinstance(data_json, list) or len(data_json) == 0:
-            return None
-
-        data = data_json[0]
-
-        return {
-            "revenueGrowth": data.get("revenueGrowth", 0) * 100,
-            "roe": data.get("roe", 0) * 100,
-            "debtToEquity": data.get("debtToEquity", 0),
-        }
-
-    except Exception:
-        return None
-
-
-# ----------------------------
-# YFINANCE DATA
-# ----------------------------
-def get_yfinance_data(ticker):
+def get_data(ticker):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
@@ -78,42 +33,128 @@ def get_yfinance_data(ticker):
 
 
 # ----------------------------
+# FEATURES
+# ----------------------------
+def compute_features(info, hist):
+    if hist is None or hist.empty:
+        return None
+
+    start = hist["Close"].iloc[0]
+    end = hist["Close"].iloc[-1]
+
+    price_growth = (end - start) / start
+    volatility = hist["Close"].pct_change().std()
+
+    return {
+        "price_growth": price_growth,
+        "volatility": volatility,
+        "profit_margin": info.get("profitMargins", 0) or 0,
+        "earnings_growth": info.get("earningsQuarterlyGrowth", 0) or 0,
+        "dividend_yield": info.get("dividendYield", 0) or 0,
+    }
+
+
+# ----------------------------
+# AI SCORE MODEL
+# ----------------------------
+def ai_score(f):
+    if not f:
+        return 0
+
+    score = 0
+    score += f["price_growth"] * 45
+    score += f["earnings_growth"] * 25
+    score += f["profit_margin"] * 20
+    score += f["dividend_yield"] * 10
+    score -= f["volatility"] * 50
+
+    score = 50 + score * 10
+    return round(max(0, min(100, score)), 2)
+
+
+# ----------------------------
+# BUILD LEADERBOARD
+# ----------------------------
+def build_leaderboard():
+    results = []
+
+    for ticker in STOCK_LIST:
+        info, hist = get_data(ticker)
+
+        if not hist is None and not hist.empty:
+            features = compute_features(info, hist)
+            score = ai_score(features)
+
+            results.append({
+                "Ticker": ticker,
+                "AI Score": score,
+                "6M Growth %": features["price_growth"] * 100,
+                "Volatility": features["volatility"]
+            })
+
+    df = pd.DataFrame(results)
+    df = df.sort_values("AI Score", ascending=False)
+
+    return df
+
+
+# ----------------------------
 # USER INPUT
 # ----------------------------
-ticker = st.text_input("Enter Stock Ticker", "AAPL")
+st.subheader("📊 Top Stocks Leaderboard")
+
+if st.button("Generate Leaderboard"):
+    with st.spinner("Analyzing stocks..."):
+        leaderboard = build_leaderboard()
+
+        st.success("Done!")
+
+        st.dataframe(
+            leaderboard,
+            use_container_width=True
+        )
+
+        # ----------------------------
+        # TOP 5 CHART
+        # ----------------------------
+        st.subheader("🏆 Top 5 Stocks")
+
+        top5 = leaderboard.head(5)
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Bar(
+            x=top5["Ticker"],
+            y=top5["AI Score"],
+            name="AI Score"
+        ))
+
+        st.plotly_chart(fig, use_container_width=True)
+
+
+# ----------------------------
+# INDIVIDUAL STOCK VIEW
+# ----------------------------
+st.subheader("🔍 Single Stock Analyzer")
+
+ticker = st.text_input("Enter ticker", "AAPL")
 
 if ticker:
+    info, hist = get_data(ticker)
 
-    info, hist = get_yfinance_data(ticker)
+    if info and hist is not None and not hist.empty:
 
-    if info:
-        st.subheader(info.get("longName", ticker))
+        st.write(info.get("longName", ticker))
 
-        if hist is not None and not hist.empty:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=hist.index,
-                y=hist["Close"],
-                mode="lines",
-                name="Close Price"
-            ))
-            st.plotly_chart(fig, use_container_width=True)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=hist.index,
+            y=hist["Close"],
+            mode="lines"
+        ))
+        st.plotly_chart(fig, use_container_width=True)
 
-    # ----------------------------
-    # FMP METRICS
-    # ----------------------------
-    fmp = get_fmp_data(ticker)
+        features = compute_features(info, hist)
+        score = ai_score(features)
 
-    if fmp:
-        st.subheader("📊 Fundamental Metrics (FMP)")
-        col1, col2, col3 = st.columns(3)
-
-        col1.metric("Revenue Growth %", f"{fmp['revenueGrowth']:.2f}%")
-        col2.metric("ROE %", f"{fmp['roe']:.2f}%")
-        col3.metric("Debt/Equity", f"{fmp['debtToEquity']:.2f}")
-
-    else:
-        st.warning(
-            "FMP data not available. "
-            "Add your API key in the sidebar or Streamlit secrets."
-        )
+        st.metric("AI Score", f"{score}/100")
