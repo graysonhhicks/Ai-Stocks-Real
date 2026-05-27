@@ -7,11 +7,11 @@ import numpy as np
 # ----------------------------
 # CONFIG
 # ----------------------------
-st.set_page_config(page_title="AI Stock Leaderboard", layout="wide")
-st.title("🏆 AI Stock Leaderboard (Yahoo Finance)")
+st.set_page_config(page_title="AI Stock Dashboard", layout="wide")
+st.title("📊 AI Stock Intelligence Dashboard")
 
 # ----------------------------
-# STOCK UNIVERSE (you can edit this list)
+# STOCK UNIVERSE
 # ----------------------------
 STOCK_LIST = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
@@ -51,6 +51,8 @@ def compute_features(info, hist):
         "profit_margin": info.get("profitMargins", 0) or 0,
         "earnings_growth": info.get("earningsQuarterlyGrowth", 0) or 0,
         "dividend_yield": info.get("dividendYield", 0) or 0,
+        "beta": info.get("beta", 1) or 1,
+        "sector": info.get("sector", "Unknown")
     }
 
 
@@ -67,9 +69,44 @@ def ai_score(f):
     score += f["profit_margin"] * 20
     score += f["dividend_yield"] * 10
     score -= f["volatility"] * 50
+    score -= abs(f["beta"] - 1) * 10
 
     score = 50 + score * 10
     return round(max(0, min(100, score)), 2)
+
+
+# ----------------------------
+# PULSE METER (GREEN / ORANGE / RED)
+# ----------------------------
+def pulse(score):
+    if score >= 70:
+        return "🟢 STRONG BUY (Green Zone)"
+    elif score >= 40:
+        return "🟠 HOLD / NEUTRAL (Orange Zone)"
+    else:
+        return "🔴 WEAK / RISKY (Red Zone)"
+
+
+# ----------------------------
+# 8-SENTENCE AI SUMMARY (simple template-based)
+# ----------------------------
+def summarize_stock(ticker, f, score):
+    if not f:
+        return "No data available."
+
+    direction = "positive" if score > 55 else "mixed" if score > 40 else "negative"
+
+    summary = f"""
+1. {ticker} shows a {direction} performance trend based on its 6-month market behavior.  
+2. The stock has a price growth of approximately {f['price_growth']*100:.2f}%, indicating momentum conditions.  
+3. Earnings growth signals are {'strong' if f['earnings_growth'] > 0 else 'weak or inconsistent'}.  
+4. Profit margins suggest {'efficient operations' if f['profit_margin'] > 0.1 else 'moderate profitability pressure'}.  
+5. Volatility levels indicate {'stable movement' if f['volatility'] < 0.03 else 'higher-than-average risk exposure'}.  
+6. Dividend yield contribution is {'meaningful' if f['dividend_yield'] > 0 else 'minimal or absent'}.  
+7. Overall sentiment classification places the stock in a {pulse(score)} category.  
+8. This evaluation reflects a combined momentum, risk, and fundamental scoring model.
+"""
+    return summary
 
 
 # ----------------------------
@@ -81,70 +118,65 @@ def build_leaderboard():
     for ticker in STOCK_LIST:
         info, hist = get_data(ticker)
 
-        if not hist is None and not hist.empty:
+        if hist is not None and not hist.empty:
             features = compute_features(info, hist)
             score = ai_score(features)
 
             results.append({
                 "Ticker": ticker,
                 "AI Score": score,
+                "Pulse": pulse(score),
                 "6M Growth %": features["price_growth"] * 100,
                 "Volatility": features["volatility"]
             })
 
     df = pd.DataFrame(results)
     df = df.sort_values("AI Score", ascending=False)
-
     return df
 
 
 # ----------------------------
-# USER INPUT
+# TOP PICKS SECTION (ABOVE SEARCH)
 # ----------------------------
-st.subheader("📊 Top Stocks Leaderboard")
+st.subheader("🏆 Top AI Stock Picks")
 
-if st.button("Generate Leaderboard"):
-    with st.spinner("Analyzing stocks..."):
-        leaderboard = build_leaderboard()
+leaderboard = build_leaderboard()
+top3 = leaderboard.head(3)
 
-        st.success("Done!")
+cols = st.columns(3)
 
-        st.dataframe(
-            leaderboard,
-            use_container_width=True
-        )
+for i, row in enumerate(top3.itertuples()):
+    with cols[i]:
+        st.metric(row.Ticker, f"{row._2}/100")
+        st.write(row.Pulse)
 
-        # ----------------------------
-        # TOP 5 CHART
-        # ----------------------------
-        st.subheader("🏆 Top 5 Stocks")
 
-        top5 = leaderboard.head(5)
-
-        fig = go.Figure()
-
-        fig.add_trace(go.Bar(
-            x=top5["Ticker"],
-            y=top5["AI Score"],
-            name="AI Score"
-        ))
-
-        st.plotly_chart(fig, use_container_width=True)
+st.divider()
 
 
 # ----------------------------
-# INDIVIDUAL STOCK VIEW
+# FULL LEADERBOARD
 # ----------------------------
-st.subheader("🔍 Single Stock Analyzer")
+st.subheader("📊 Full Leaderboard")
 
-ticker = st.text_input("Enter ticker", "AAPL")
+st.dataframe(leaderboard, use_container_width=True)
+
+st.divider()
+
+
+# ----------------------------
+# SEARCH BAR (BELOW TOP PICKS)
+# ----------------------------
+st.subheader("🔍 Stock Analyzer")
+
+ticker = st.text_input("Enter Stock Ticker", "AAPL")
 
 if ticker:
     info, hist = get_data(ticker)
 
     if info and hist is not None and not hist.empty:
 
-        st.write(info.get("longName", ticker))
+        st.write(f"### {info.get('longName', ticker)}")
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(
@@ -158,3 +190,7 @@ if ticker:
         score = ai_score(features)
 
         st.metric("AI Score", f"{score}/100")
+        st.write(pulse(score))
+
+        st.subheader("🧠 AI Summary")
+        st.write(summarize_stock(ticker, features, score))
