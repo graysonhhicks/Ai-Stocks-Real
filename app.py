@@ -19,7 +19,7 @@ st.markdown("""
 
 st.title("📊 AI Stock Analyzer (FMP Institutional Model)")
 
-API_KEY = "YOUR_API_KEY_HERE"
+API_KEY = st.secrets["FMP_API_KEY"]
 
 # ----------------------------
 # FMP DATA FETCH
@@ -58,9 +58,9 @@ def get_fmp_data(ticker):
     )
 
     # Rating
-    if score >= 68:
+    if score >= 55:
         rating = "Lucrative / Profitable"
-    elif score >= 50:
+    elif score >= 30:
         rating = "Neutral Profit"
     else:
         rating = "Unlikely Profitable"
