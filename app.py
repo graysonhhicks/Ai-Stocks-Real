@@ -1,7 +1,6 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 
 # ---------------------------------------------------
@@ -119,25 +118,29 @@ STOCKS = [
 def get_stock_data(ticker):
     try:
         stock = yf.Ticker(ticker)
-
         hist = stock.history(period="6mo")
 
         if hist.empty:
             return None, None
 
         info = stock.info
-
         return info, hist
 
-    except:
+    except Exception as e:
+        st.warning(f"Error fetching {ticker}: {str(e)}")
         return None, None
 
 # ---------------------------------------------------
 # AI SCORE ENGINE
 # ---------------------------------------------------
 def calculate_ai_score(hist):
-
+    if hist is None or hist.empty:
+        return 0
+    
     close = hist["Close"]
+    
+    if len(close) < 50:
+        return 0
 
     # 6 month return
     return_6m = (
@@ -268,18 +271,21 @@ for ticker in STOCKS:
         "Rating": rating(score)
     })
 
-leaderboard = pd.DataFrame(leaderboard_rows)
+if leaderboard_rows:
+    leaderboard = pd.DataFrame(leaderboard_rows)
 
-leaderboard = leaderboard.sort_values(
-    by="AI Score",
-    ascending=False
-)
+    leaderboard = leaderboard.sort_values(
+        by="AI Score",
+        ascending=False
+    )
 
-st.dataframe(
-    leaderboard,
-    use_container_width=True,
-    hide_index=True
-)
+    st.dataframe(
+        leaderboard,
+        use_container_width=True,
+        hide_index=True
+    )
+else:
+    st.warning("Unable to load leaderboard data. Please try again.")
 
 # ---------------------------------------------------
 # STOCK SEARCH
@@ -307,10 +313,7 @@ if ticker:
 
         score = calculate_ai_score(hist)
 
-        company_name = info.get(
-            "longName",
-            ticker
-        )
+        company_name = info.get("longName", ticker) if info else ticker
 
         current_price = hist["Close"].iloc[-1]
 
@@ -430,7 +433,8 @@ if ticker:
                 showgrid=False
             ),
 
-            height=500
+            height=500,
+            hovermode="x unified"
         )
 
         st.plotly_chart(
