@@ -4,167 +4,449 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-# ----------------------------
-# CONFIG
-# ----------------------------
-st.set_page_config(page_title="AI Stock Leaderboard", layout="wide")
-st.title("📊 AI Stock Leaderboard (Yahoo Finance Only)")
+# ---------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------
+st.set_page_config(
+    page_title="AI Stock Terminal",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-# ----------------------------
-# STOCK UNIVERSE
-# ----------------------------
+# ---------------------------------------------------
+# DARK MODE / PROFESSIONAL UI
+# ---------------------------------------------------
+st.markdown("""
+<style>
+
+/* Entire App */
+.stApp {
+    background-color: #0b0f19;
+    color: white;
+}
+
+/* Main block */
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+}
+
+/* Headers */
+h1, h2, h3 {
+    color: white;
+    font-weight: 700;
+}
+
+/* Metric Cards */
+[data-testid="metric-container"] {
+    background: #111827;
+    border: 1px solid #1f2937;
+    padding: 18px;
+    border-radius: 16px;
+    box-shadow: 0px 0px 15px rgba(0,0,0,0.35);
+}
+
+/* Dataframe */
+[data-testid="stDataFrame"] {
+    background-color: #111827;
+    border-radius: 12px;
+    border: 1px solid #1f2937;
+}
+
+/* Text Input */
+.stTextInput input {
+    background-color: #111827 !important;
+    color: white !important;
+    border: 1px solid #374151 !important;
+    border-radius: 10px !important;
+}
+
+/* Buttons */
+.stButton button {
+    background-color: #2563eb;
+    color: white;
+    border-radius: 10px;
+    border: none;
+    padding: 10px 18px;
+    font-weight: 600;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background-color: #111827;
+}
+
+/* Table text */
+table {
+    color: white !important;
+}
+
+/* Remove toolbar */
+header {
+    visibility: hidden;
+}
+
+footer {
+    visibility: hidden;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------
+# TITLE
+# ---------------------------------------------------
+st.markdown("""
+# 📊 AI Stock Terminal
+
+### Institutional-Style Stock Intelligence Dashboard
+""")
+
+# ---------------------------------------------------
+# STOCK LIST
+# ---------------------------------------------------
 STOCKS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "META",
-    "TSLA", "NVDA", "NFLX", "AMD", "JPM",
-    "V", "MA", "DIS", "PLTR", "INTC"
+    "NVDA", "AAPL", "MSFT", "GOOGL", "AMZN",
+    "META", "TSLA", "AMD", "NFLX", "PLTR",
+    "JPM", "V", "MA", "DIS", "INTC"
 ]
 
-# ----------------------------
-# GET DATA
-# ----------------------------
+# ---------------------------------------------------
+# DATA FUNCTION
+# ---------------------------------------------------
 @st.cache_data(ttl=3600)
-def get_data(ticker):
+def get_stock_data(ticker):
     try:
         stock = yf.Ticker(ticker)
+
         hist = stock.history(period="6mo")
 
-        if hist is None or hist.empty:
+        if hist.empty:
             return None, None
 
-        return stock.info, hist
+        info = stock.info
+
+        return info, hist
+
     except:
         return None, None
 
-
-# ----------------------------
+# ---------------------------------------------------
 # AI SCORE ENGINE
-# ----------------------------
-def compute_score(hist):
+# ---------------------------------------------------
+def calculate_ai_score(hist):
+
     close = hist["Close"]
 
-    # 6-month return
-    return_6m = (close.iloc[-1] - close.iloc[0]) / close.iloc[0]
+    # 6 month return
+    return_6m = (
+        (close.iloc[-1] - close.iloc[0])
+        / close.iloc[0]
+    )
 
-    # volatility (risk penalty)
+    # recent momentum
+    momentum = (
+        (close.iloc[-1] - close.iloc[-20])
+        / close.iloc[-20]
+    )
+
+    # volatility penalty
     volatility = close.pct_change().std()
 
-    # momentum (recent trend)
-    momentum = (close.iloc[-1] - close.iloc[-20]) / close.iloc[-20]
+    # moving average trend
+    ma20 = close.tail(20).mean()
+    ma50 = close.tail(50).mean()
 
-    # volume strength (proxy)
-    vol_strength = hist["Volume"].mean() / hist["Volume"].max()
+    trend_bonus = 0.15 if ma20 > ma50 else -0.15
 
-    # AI score formula (0–100)
+    # final score
     score = (
-        (return_6m * 60) +
-        (momentum * 40) -
-        (volatility * 50) +
-        (vol_strength * 10)
-    ) * 100
+        (return_6m * 45) +
+        (momentum * 35) -
+        (volatility * 30) +
+        (trend_bonus * 100)
+    )
 
-    return max(0, min(100, score))
+    score = max(0, min(100, score * 100))
 
+    return round(score, 2)
 
-# ----------------------------
-# COLOR PULSE METER
-# ----------------------------
-def pulse_color(score):
-    if score >= 70:
-        return "🟢 STRONG (Green Zone)"
-    elif score >= 40:
-        return "🟠 MODERATE (Orange Zone)"
+# ---------------------------------------------------
+# RATING SYSTEM
+# ---------------------------------------------------
+def rating(score):
+
+    if score >= 75:
+        return "🟢 ELITE"
+
+    elif score >= 55:
+        return "🟡 SOLID"
+
+    elif score >= 35:
+        return "🟠 RISKY"
+
     else:
-        return "🔴 WEAK (Red Zone)"
+        return "🔴 WEAK"
 
+# ---------------------------------------------------
+# COLOR FOR GAUGE
+# ---------------------------------------------------
+def gauge_color(score):
 
-# ----------------------------
-# AI SUMMARY (8 SENTENCES)
-# ----------------------------
+    if score >= 75:
+        return "#22c55e"
+
+    elif score >= 55:
+        return "#eab308"
+
+    elif score >= 35:
+        return "#f97316"
+
+    else:
+        return "#ef4444"
+
+# ---------------------------------------------------
+# SUMMARY GENERATOR
+# ---------------------------------------------------
 def generate_summary(ticker, score, hist):
+
     close = hist["Close"]
 
-    change = (close.iloc[-1] - close.iloc[0]) / close.iloc[0] * 100
-    volatility = hist["Close"].pct_change().std() * 100
+    change = (
+        (close.iloc[-1] - close.iloc[0])
+        / close.iloc[0]
+    ) * 100
 
-    trend = "upward" if close.iloc[-1] > close.mean() else "downward"
+    volatility = (
+        close.pct_change().std()
+    ) * 100
 
-    summary = f"""
-1. {ticker} shows a 6-month price change of {change:.2f}%.
-2. The stock is currently trending in a {trend} direction.
-3. Price stability is measured with a volatility of about {volatility:.2f}%.
-4. The AI score model evaluates momentum, risk, and performance.
-5. Current AI Score: {score:.2f}/100.
-6. This score reflects combined return strength and volatility adjustment.
-7. Higher scores indicate stronger growth potential under current trends.
-8. Overall, {ticker} is classified as {pulse_color(score)}.
+    trend = (
+        "upward"
+        if close.iloc[-1] > close.mean()
+        else "downward"
+    )
+
+    return f"""
+1. {ticker} has moved {change:.2f}% over the past six months.
+
+2. The stock currently shows a primarily {trend} trading trend.
+
+3. Momentum indicators are included in the AI scoring system.
+
+4. Volatility currently sits around {volatility:.2f}%.
+
+5. Stronger momentum and lower volatility improve ratings.
+
+6. The AI engine combines return strength, trend analysis, and risk metrics.
+
+7. Institutional-style weighting is used to evaluate the stock.
+
+8. Overall classification: {rating(score)} with an AI Score of {score}/100.
 """
-    return summary
 
+# ---------------------------------------------------
+# LEADERBOARD
+# ---------------------------------------------------
+st.markdown("## 🏆 AI Leaderboard")
 
-# ----------------------------
-# BUILD LEADERBOARD
-# ----------------------------
-def build_leaderboard():
-    rows = []
+leaderboard_rows = []
 
-    for ticker in STOCKS:
-        info, hist = get_data(ticker)
+for ticker in STOCKS:
 
-        if hist is None:
-            continue
-
-        score = compute_score(hist)
-
-        rows.append({
-            "Ticker": ticker,
-            "AI Score": score
-        })
-
-    df = pd.DataFrame(rows).sort_values("AI Score", ascending=False)
-
-    return df
-
-
-# ----------------------------
-# LEADERBOARD SECTION (TOP)
-# ----------------------------
-st.subheader("🏆 AI Score Leaderboard")
-
-leaderboard = build_leaderboard()
-
-st.dataframe(leaderboard, use_container_width=True)
-
-
-# ----------------------------
-# STOCK DETAIL VIEW
-# ----------------------------
-st.subheader("📈 Analyze a Stock")
-
-ticker = st.text_input("Search Stock (e.g. AAPL, TSLA, NVDA)", "AAPL")
-
-if ticker:
-    info, hist = get_data(ticker)
+    info, hist = get_stock_data(ticker)
 
     if hist is None:
-        st.error("No data found for this ticker.")
+        continue
+
+    score = calculate_ai_score(hist)
+
+    leaderboard_rows.append({
+        "Ticker": ticker,
+        "AI Score": round(score, 2),
+        "Rating": rating(score)
+    })
+
+leaderboard = pd.DataFrame(leaderboard_rows)
+
+leaderboard = leaderboard.sort_values(
+    by="AI Score",
+    ascending=False
+)
+
+st.dataframe(
+    leaderboard,
+    use_container_width=True,
+    hide_index=True
+)
+
+# ---------------------------------------------------
+# STOCK SEARCH
+# ---------------------------------------------------
+st.markdown("---")
+st.markdown("## 🔎 Analyze Individual Stock")
+
+ticker = st.text_input(
+    "Enter Stock Ticker",
+    "NVDA"
+).upper()
+
+# ---------------------------------------------------
+# STOCK ANALYSIS
+# ---------------------------------------------------
+if ticker:
+
+    info, hist = get_stock_data(ticker)
+
+    if hist is None:
+
+        st.error("Stock data unavailable.")
+
     else:
-        score = compute_score(hist)
 
-        st.subheader(f"{ticker} Analysis")
-        st.markdown(f"### {pulse_color(score)}")
-        st.metric("AI Score", f"{score:.2f}/100")
+        score = calculate_ai_score(hist)
 
-        # Chart
+        company_name = info.get(
+            "longName",
+            ticker
+        )
+
+        current_price = hist["Close"].iloc[-1]
+
+        # ---------------------------------------------------
+        # HEADER
+        # ---------------------------------------------------
+        st.markdown(f"# {company_name}")
+
+        st.markdown(
+            f"### {rating(score)}"
+        )
+
+        # ---------------------------------------------------
+        # METRICS
+        # ---------------------------------------------------
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric(
+            "AI Score",
+            f"{score}/100"
+        )
+
+        col2.metric(
+            "Current Price",
+            f"${current_price:.2f}"
+        )
+
+        six_month_return = (
+            (
+                hist["Close"].iloc[-1]
+                - hist["Close"].iloc[0]
+            )
+            / hist["Close"].iloc[0]
+        ) * 100
+
+        col3.metric(
+            "6M Return",
+            f"{six_month_return:.2f}%"
+        )
+
+        # ---------------------------------------------------
+        # AI GAUGE
+        # ---------------------------------------------------
+        fig_gauge = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=score,
+
+            number={
+                "font": {
+                    "color": "white",
+                    "size": 42
+                }
+            },
+
+            gauge={
+                "axis": {
+                    "range": [0, 100],
+                    "tickcolor": "white"
+                },
+
+                "bar": {
+                    "color": gauge_color(score)
+                },
+
+                "bgcolor": "#111827",
+
+                "borderwidth": 2,
+
+                "bordercolor": "#374151",
+
+                "steps": [
+                    {"range": [0, 35], "color": "#3f0d12"},
+                    {"range": [35, 55], "color": "#5a2d0c"},
+                    {"range": [55, 75], "color": "#4a4a08"},
+                    {"range": [75, 100], "color": "#052e16"}
+                ]
+            }
+        ))
+
+        fig_gauge.update_layout(
+            paper_bgcolor="#0b0f19",
+            font={"color": "white"},
+            height=350
+        )
+
+        st.plotly_chart(
+            fig_gauge,
+            use_container_width=True
+        )
+
+        # ---------------------------------------------------
+        # PRICE CHART
+        # ---------------------------------------------------
         fig = go.Figure()
+
         fig.add_trace(go.Scatter(
             x=hist.index,
             y=hist["Close"],
             mode="lines",
-            name="Price"
+            name="Close Price",
+            line=dict(
+                color="#22c55e",
+                width=3
+            )
         ))
-        st.plotly_chart(fig, use_container_width=True)
 
-        # Summary
-        summary = generate_summary(ticker, score, hist)
-        st.subheader("🧠 AI Analysis Summary (8 Sentences)")
-        st.write(summary)
+        fig.update_layout(
+            paper_bgcolor="#111827",
+            plot_bgcolor="#111827",
+            font=dict(color="white"),
+
+            xaxis=dict(
+                showgrid=False
+            ),
+
+            yaxis=dict(
+                showgrid=False
+            ),
+
+            height=500
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
+
+        # ---------------------------------------------------
+        # SUMMARY
+        # ---------------------------------------------------
+        st.markdown("## 🧠 AI Analysis")
+
+        st.write(
+            generate_summary(
+                ticker,
+                score,
+                hist
+            )
+        )
