@@ -2,6 +2,9 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
+import warnings
+
+warnings.filterwarnings('ignore')
 
 # ---------------------------------------------------
 # PAGE CONFIG
@@ -112,9 +115,8 @@ STOCKS = [
 ]
 
 # ---------------------------------------------------
-# DATA FUNCTION
+# DATA FUNCTION - NO CACHING TO AVOID MANAGER ISSUES
 # ---------------------------------------------------
-@st.cache_data(ttl=3600)
 def get_stock_data(ticker):
     try:
         stock = yf.Ticker(ticker)
@@ -127,7 +129,7 @@ def get_stock_data(ticker):
         return info, hist
 
     except Exception as e:
-        st.warning(f"Error fetching {ticker}: {str(e)}")
+        print(f"Error fetching {ticker}: {str(e)}")
         return None, None
 
 # ---------------------------------------------------
@@ -142,53 +144,53 @@ def calculate_ai_score(hist):
     if len(close) < 50:
         return 0
 
-    # 6 month return
-    return_6m = (
-        (close.iloc[-1] - close.iloc[0])
-        / close.iloc[0]
-    )
+    try:
+        # 6 month return
+        return_6m = (
+            (close.iloc[-1] - close.iloc[0])
+            / close.iloc[0]
+        )
 
-    # recent momentum
-    momentum = (
-        (close.iloc[-1] - close.iloc[-20])
-        / close.iloc[-20]
-    )
+        # recent momentum
+        momentum = (
+            (close.iloc[-1] - close.iloc[-20])
+            / close.iloc[-20]
+        )
 
-    # volatility penalty
-    volatility = close.pct_change().std()
+        # volatility penalty
+        volatility = close.pct_change().std()
 
-    # moving average trend
-    ma20 = close.tail(20).mean()
-    ma50 = close.tail(50).mean()
+        # moving average trend
+        ma20 = close.tail(20).mean()
+        ma50 = close.tail(50).mean()
 
-    trend_bonus = 0.15 if ma20 > ma50 else -0.15
+        trend_bonus = 0.15 if ma20 > ma50 else -0.15
 
-    # final score
-    score = (
-        (return_6m * 45) +
-        (momentum * 35) -
-        (volatility * 30) +
-        (trend_bonus * 100)
-    )
+        # final score
+        score = (
+            (return_6m * 45) +
+            (momentum * 35) -
+            (volatility * 30) +
+            (trend_bonus * 100)
+        )
 
-    score = max(0, min(100, score * 100))
-
-    return round(score, 2)
+        score = max(0, min(100, score * 100))
+        return round(score, 2)
+    
+    except Exception as e:
+        print(f"Score calculation error: {e}")
+        return 0
 
 # ---------------------------------------------------
 # RATING SYSTEM
 # ---------------------------------------------------
 def rating(score):
-
     if score >= 75:
         return "🟢 ELITE"
-
     elif score >= 55:
         return "🟡 SOLID"
-
     elif score >= 35:
         return "🟠 RISKY"
-
     else:
         return "🔴 WEAK"
 
@@ -196,16 +198,12 @@ def rating(score):
 # COLOR FOR GAUGE
 # ---------------------------------------------------
 def gauge_color(score):
-
     if score >= 75:
         return "#22c55e"
-
     elif score >= 55:
         return "#eab308"
-
     elif score >= 35:
         return "#f97316"
-
     else:
         return "#ef4444"
 
@@ -213,7 +211,6 @@ def gauge_color(score):
 # SUMMARY GENERATOR
 # ---------------------------------------------------
 def generate_summary(ticker, score, hist):
-
     close = hist["Close"]
 
     change = (
@@ -254,26 +251,25 @@ def generate_summary(ticker, score, hist):
 # ---------------------------------------------------
 st.markdown("## 🏆 AI Leaderboard")
 
-leaderboard_rows = []
+with st.spinner("Loading leaderboard..."):
+    leaderboard_rows = []
 
-for ticker in STOCKS:
+    for ticker in STOCKS:
+        info, hist = get_stock_data(ticker)
 
-    info, hist = get_stock_data(ticker)
+        if hist is None:
+            continue
 
-    if hist is None:
-        continue
+        score = calculate_ai_score(hist)
 
-    score = calculate_ai_score(hist)
-
-    leaderboard_rows.append({
-        "Ticker": ticker,
-        "AI Score": round(score, 2),
-        "Rating": rating(score)
-    })
+        leaderboard_rows.append({
+            "Ticker": ticker,
+            "AI Score": round(score, 2),
+            "Rating": rating(score)
+        })
 
 if leaderboard_rows:
     leaderboard = pd.DataFrame(leaderboard_rows)
-
     leaderboard = leaderboard.sort_values(
         by="AI Score",
         ascending=False
@@ -302,44 +298,24 @@ ticker = st.text_input(
 # STOCK ANALYSIS
 # ---------------------------------------------------
 if ticker:
-
     info, hist = get_stock_data(ticker)
 
     if hist is None:
-
         st.error("Stock data unavailable.")
-
     else:
-
         score = calculate_ai_score(hist)
-
         company_name = info.get("longName", ticker) if info else ticker
-
         current_price = hist["Close"].iloc[-1]
 
-        # ---------------------------------------------------
         # HEADER
-        # ---------------------------------------------------
         st.markdown(f"# {company_name}")
+        st.markdown(f"### {rating(score)}")
 
-        st.markdown(
-            f"### {rating(score)}"
-        )
-
-        # ---------------------------------------------------
         # METRICS
-        # ---------------------------------------------------
         col1, col2, col3 = st.columns(3)
 
-        col1.metric(
-            "AI Score",
-            f"{score}/100"
-        )
-
-        col2.metric(
-            "Current Price",
-            f"${current_price:.2f}"
-        )
+        col1.metric("AI Score", f"{score}/100")
+        col2.metric("Current Price", f"${current_price:.2f}")
 
         six_month_return = (
             (
@@ -349,41 +325,29 @@ if ticker:
             / hist["Close"].iloc[0]
         ) * 100
 
-        col3.metric(
-            "6M Return",
-            f"{six_month_return:.2f}%"
-        )
+        col3.metric("6M Return", f"{six_month_return:.2f}%")
 
-        # ---------------------------------------------------
         # AI GAUGE
-        # ---------------------------------------------------
         fig_gauge = go.Figure(go.Indicator(
             mode="gauge+number",
             value=score,
-
             number={
                 "font": {
                     "color": "white",
                     "size": 42
                 }
             },
-
             gauge={
                 "axis": {
                     "range": [0, 100],
                     "tickcolor": "white"
                 },
-
                 "bar": {
                     "color": gauge_color(score)
                 },
-
                 "bgcolor": "#111827",
-
                 "borderwidth": 2,
-
                 "bordercolor": "#374151",
-
                 "steps": [
                     {"range": [0, 35], "color": "#3f0d12"},
                     {"range": [35, 55], "color": "#5a2d0c"},
@@ -399,14 +363,9 @@ if ticker:
             height=350
         )
 
-        st.plotly_chart(
-            fig_gauge,
-            use_container_width=True
-        )
+        st.plotly_chart(fig_gauge, use_container_width=True)
 
-        # ---------------------------------------------------
         # PRICE CHART
-        # ---------------------------------------------------
         fig = go.Figure()
 
         fig.add_trace(go.Scatter(
@@ -424,33 +383,14 @@ if ticker:
             paper_bgcolor="#111827",
             plot_bgcolor="#111827",
             font=dict(color="white"),
-
-            xaxis=dict(
-                showgrid=False
-            ),
-
-            yaxis=dict(
-                showgrid=False
-            ),
-
+            xaxis=dict(showgrid=False),
+            yaxis=dict(showgrid=False),
             height=500,
             hovermode="x unified"
         )
 
-        st.plotly_chart(
-            fig,
-            use_container_width=True
-        )
+        st.plotly_chart(fig, use_container_width=True)
 
-        # ---------------------------------------------------
         # SUMMARY
-        # ---------------------------------------------------
         st.markdown("## 🧠 AI Analysis")
-
-        st.write(
-            generate_summary(
-                ticker,
-                score,
-                hist
-            )
-        )
+        st.write(generate_summary(ticker, score, hist))
